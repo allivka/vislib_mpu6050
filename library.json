@@ -1,0 +1,28 @@
+{
+  "name": "vislib_vex5",
+  "version": "0.0.7",
+  "description": "A simple implementation of vislib gyro interfaces for mpu6050 gyroscope sensor with electronic cats library under the hood",
+  "keywords": "mpu6050, vislib, gyroscope, gyro",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/allivka/vislib_mpu6050.git"
+  },
+  "authors":
+  [
+    {
+      "name": "Aliev Daniil / Алиев Даниил",
+      "email": "allivka1920@gmail.com"
+    }
+  ],
+  "license": "MIT",
+  "build" : {
+    "includeDir": "include"
+  },
+  "dependencies": {
+    "alivka/vislib": "*",
+    "electroniccats/MPU6050": "*"
+  },
+  "frameworks": "Arduino",
+  "platforms": "atmelavr"
+}
