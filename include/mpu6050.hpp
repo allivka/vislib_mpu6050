@@ -1,7 +1,7 @@
 #pragma once
 
 #include <vislib.hpp>
-#include <../MPU6050/src/MPU6050.h>
+#include <MPU6050.h>
 
 namespace vislib_mpu6050 {
     class Gyroscope;
@@ -10,7 +10,7 @@ namespace vislib_mpu6050 {
 class vislib_mpu6050::Gyroscope : public vislib::gyro::UltimateGyroController<double, size_t>, public MPU6050 {
 public:
 
-    virtual inline vislib::util::Result<vislib::util::Vector<double>> getAcceleration() const noexcept override {
+    virtual inline vislib::util::Result<vislib::util::Vector<double>> getAcceleration() const noexcept final {
         vislib::util::Vector<double> acceleration(vislib::util::Array<double>({double(), double(), double()}));
 
         int16_t ax, ay, az;
@@ -25,7 +25,7 @@ public:
 
     }
 
-    virtual inline vislib::util::Result<vislib::util::Vector<double>> getAngularSpeed() const noexcept override {
+    virtual inline vislib::util::Result<vislib::util::Vector<double>> getAngularSpeed() const noexcept final {
         vislib::util::Vector<double> speed(vislib::util::Array<double>({double(), double(), double()}));
 
         int16_t gx, gy, gz;
