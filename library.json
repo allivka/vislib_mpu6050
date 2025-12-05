@@ -1,6 +1,6 @@
 {
   "name": "vislib_mpu6050",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A simple implementation of vislib gyro interfaces for mpu6050 gyroscope sensor with electronic cats library under the hood",
   "keywords": "mpu6050, vislib, gyroscope, gyro",
   "repository":
@@ -20,7 +20,7 @@
     "includeDir": "include"
   },
   "dependencies": {
-    "alivka/vislib": "*",
+    "alivka/vislib_arduino": "*",
     "electroniccats/MPU6050": "*"
   },
   "frameworks": "Arduino",

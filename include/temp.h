@@ -1,128 +1,104 @@
-
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 
 MPU6050 mpu;
 
-int const INTERRUPT_PIN = 2;  // Define the interruption #0 pin
-bool blinkState;
+static const int INTERRUPT_PIN = 2;
 
-/*---MPU6050 Control/Status Variables---*/
-bool DMPReady = false;  // Set true if DMP init was successful
-uint8_t MPUIntStatus;   // Holds actual interrupt status byte from MPU
-uint8_t devStatus;      // Return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // Expected DMP packet size (default is 42 bytes)
-uint8_t FIFOBuffer[64]; // FIFO storage buffer
-
-/*---Orientation/Motion Variables---*/
-Quaternion q;           // [w, x, y, z]         Quaternion container
-VectorInt16 aa;         // [x, y, z]            Accel sensor measurements
-VectorInt16 gy;         // [x, y, z]            Gyro sensor measurements
-VectorInt16 aaReal;     // [x, y, z]            Gravity-free accel sensor measurements
-VectorInt16 aaWorld;    // [x, y, z]            World-frame accel sensor measurements
-VectorFloat gravity;    // [x, y, z]            Gravity vector
-float euler[3];         // [psi, theta, phi]    Euler angle container
-float ypr[3];           // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
-
-/*-Packet structure for InvenSense teapot demo-*/
-uint8_t teapotPacket[14] = { '$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n' };
-
-volatile bool MPUInterrupt = false;
-void DMPDataReady() {
-  MPUInterrupt = true;
+volatile bool mpuInterrupt = false;
+void dmpDataReady() {
+    mpuInterrupt = true;
 }
 
+/* --- Buffers / state --- */
+uint8_t fifoBuffer[64];
+uint16_t packetSize = 0;
+bool dmpReady = false;
+
+/* --- DMP outputs --- */
+Quaternion q;
+VectorFloat gravity;
+float ypr[3];
+
+VectorInt16 aa;       // raw accel
+VectorInt16 aaReal;   // linear accel (gravity removed)
+VectorInt16 aaWorld;  // linear accel in world frame
+
 void setup() {
-  mpu.initialize();
-  pinMode(INTERRUPT_PIN, INPUT);
+    Serial.begin(115200);
+    while (!Serial);
 
-  Serial.println(F("Testing MPU6050 connection..."));
-  if(mpu.testConnection() == false){
-    Serial.println("MPU6050 connection failed");
-    while(true);
-  }
-  else {
-    Serial.println("MPU6050 connection successful");
-  }
+    mpu.initialize();
+    pinMode(INTERRUPT_PIN, INPUT);
 
-  Serial.println(F("\nSend any character to begin: "));
-  while (Serial.available() && Serial.read());
-  while (!Serial.available());
-  while (Serial.available() && Serial.read());
+    if (!mpu.testConnection()) {
+        Serial.println("MPU6050 connection failed");
+        while (true);
+    }
 
-  Serial.println(F("Initializing DMP..."));
-  devStatus = mpu.dmpInitialize();
+    Serial.println("Initializing DMP...");
+    uint8_t status = mpu.dmpInitialize();
 
-  mpu.setXGyroOffset(0);
-  mpu.setYGyroOffset(0);
-  mpu.setZGyroOffset(0);
-  mpu.setXAccelOffset(0);
-  mpu.setYAccelOffset(0);
-  mpu.setZAccelOffset(0);
+    // OPTIONAL: offsets — in practice you apply your own calibrated values
+    mpu.setXGyroOffset(0);
+    mpu.setYGyroOffset(0);
+    mpu.setZGyroOffset(0);
+    mpu.setXAccelOffset(0);
+    mpu.setYAccelOffset(0);
+    mpu.setZAccelOffset(0);
 
-  if (devStatus == 0) {
+    if (status != 0) {
+        Serial.print("DMP init failed: ");
+        Serial.println(status);
+        while (true);
+    }
+
+    // Optional auto-calibration
     mpu.CalibrateAccel(6);
     mpu.CalibrateGyro(6);
-    Serial.println("These are the Active offsets: ");
     mpu.PrintActiveOffsets();
-    Serial.println(F("Enabling DMP..."));
+
     mpu.setDMPEnabled(true);
 
-    Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
-    Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
-    Serial.println(F(")..."));
-    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), DMPDataReady, RISING);
-    MPUIntStatus = mpu.getIntStatus();
+    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
 
-    Serial.println(F("DMP ready! Waiting for first interrupt..."));
-    DMPReady = true;
     packetSize = mpu.dmpGetFIFOPacketSize();
-  }
-  else {
-    Serial.print(F("DMP Initialization failed (code "));
-    Serial.print(devStatus);
-    Serial.println(F(")"));
-  }
-  pinMode(LED_BUILTIN, OUTPUT);
+    dmpReady = true;
+
+    Serial.println("DMP ready");
 }
 
 void loop() {
-  if (!DMPReady) return;
+    if (!dmpReady) return;
 
-  if (mpu.dmpGetCurrentFIFOPacket(FIFOBuffer)) {
+    if (!mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) {
+        return; // no packet yet
+    }
 
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
+    /* ----------- Orientation (YPR) ----------- */
+    mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-    Serial.print("ypr\t");
-    Serial.print(ypr[0] * 180/M_PI);
-    Serial.print("\t");
-    Serial.print(ypr[1] * 180/M_PI);
-    Serial.print("\t");
+
+    Serial.print("ypr(deg)\t");
+    Serial.print(ypr[0] * 180/M_PI); Serial.print("\t");
+    Serial.print(ypr[1] * 180/M_PI); Serial.print("\t");
     Serial.println(ypr[2] * 180/M_PI);
 
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
-    mpu.dmpGetAccel(&aa, FIFOBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
+    /* ----------- Linear Accel (body frame) ----------- */
+    mpu.dmpGetAccel(&aa, fifoBuffer);
     mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-    Serial.print("areal\t");
-    Serial.print(aaReal.x);
-    Serial.print("\t");
-    Serial.print(aaReal.y);
-    Serial.print("\t");
+
+    Serial.print("a_real\t");
+    Serial.print(aaReal.x); Serial.print("\t");
+    Serial.print(aaReal.y); Serial.print("\t");
     Serial.println(aaReal.z);
 
-
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
-    mpu.dmpGetAccel(&aa, FIFOBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+    /* ----------- Linear Accel (world frame) ----------- */
     mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
-    Serial.print("aworld\t");
-    Serial.print(aaWorld.x);
-    Serial.print("\t");
-    Serial.print(aaWorld.y);
-    Serial.print("\t");
+
+    Serial.print("a_world\t");
+    Serial.print(aaWorld.x); Serial.print("\t");
+    Serial.print(aaWorld.y); Serial.print("\t");
     Serial.println(aaWorld.z);
-  }
 }
