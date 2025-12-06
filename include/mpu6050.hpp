@@ -2,20 +2,24 @@
 
 #include <vislib_arduino.hpp>
 #include <I2Cdev.h>
-#include <MPU6050_6Axis_MotionApps20.h>
-
-#include "../../vislib_arduino/include/vislib_arduino.hpp"
+#include <MPU6050_6Axis_MotionApps612.h>
 
 namespace vislib::binds::mpu6050 {
-    class GyroscopeBase;
-    class GyroscopeDMP;
-    class GyroscopeCalculator;
+
+class GyroscopeBase;
+class GyroscopeDMP;
+class GyroscopeCalculator;
+
+constexpr size_t DMPFIFOBufferSize = 64;
+constexpr double defaultGyroDivider = 131.0;
+constexpr double defaultAccelerationDivider = 16384.0;
+
 };
 
 class vislib::binds::mpu6050::GyroscopeBase : public gyro::UltimateGyroGetter<double, size_t, double, nullptr_t>, public MPU6050 {
 protected:
-    double gyroDivider = 131.0;
-    double accelerationDivider = 16384.0;
+    double gyroDivider = defaultGyroDivider;
+    double accelerationDivider = defaultAccelerationDivider;
 public:
 
     virtual ~GyroscopeBase() = default;
@@ -23,7 +27,8 @@ public:
     virtual util::Error init() noexcept {
         initialize();
         if (!testConnection()) return {util::ErrorCode::initFailed, "Failed mpu6050 connection test"};
-        calibrate();
+        auto e = calibrate();
+        if (e) return e;
 
         return {};
     }
@@ -37,10 +42,10 @@ public:
         this->setXAccelOffset(0);
         this->setYAccelOffset(0);
         this->setZAccelOffset(0);
-        
+
         this->CalibrateAccel(6);
         this->CalibrateGyro(6);
-        
+
         return {};
     }
 
@@ -106,7 +111,7 @@ public:
         return {};
     }
 
-    virtual ~GyroscopeCalculator() = default;
+    virtual ~GyroscopeCalculator() override = default;
 
 };
 
@@ -115,14 +120,14 @@ protected:
 
     volatile bool dmpReady = false;
 
-    static arduino::CallbackTable table;
+    inline static volatile arduino::CallbackTable table;
 
     static void interruptRouter() noexcept {
         if (!table.isInitialized()) return;
         table.manualProcess();
     }
 
-    static uint8_t fifoBuffer[64];
+    inline static uint8_t fifoBuffer[DMPFIFOBufferSize];
 
     VectorInt16 aa;
     VectorInt16 aaReal;
@@ -138,11 +143,11 @@ public:
 
         return table.InitCallbackTable(ports,
             arduino::InterruptPortInitializer,
-            [] -> util::Error {return {};},
+            [](arduino::port_t) -> util::Error {return {};},
             arduino::InterruptPortChecker);
     }
 
-    virtual util::Error initDMP(uint16_t interruptPin) noexcept {
+    virtual util::Error initDMP(arduino::port_t interruptPin) noexcept {
 
         if (!table.isInitialized())
             return {util::ErrorCode::invalidConfiguration, "Interrupt table for gyroscope DMP driver wasn't initialized"};
@@ -157,7 +162,7 @@ public:
         calibrate();
         setDMPEnabled(true);
 
-        auto e = table.setCallback(interruptPin, [this] {this->dmpReady = true;});
+        auto e = table.setCallback(interruptPin, [this]() -> void {this->dmpReady = true;});
 
         if (e) return e;
 
@@ -172,21 +177,22 @@ public:
     util::Error update(nullptr_t) override {
         if (!dmpReady) return {};
 
-        if (!dmpGetCurrentFIFOPacket(fifoBuffer)) return {};
+        if (!dmpGetCurrentFIFOPacket(fifoBuffer)) {
+            resetFIFO();
+            return {};
+        }
 
         dmpGetQuaternion(&q, fifoBuffer);
         dmpGetGravity(&gravity, &q);
         dmpGetYawPitchRoll(ypr, &q, &gravity);
 
-        ypr[0] = ypr[0] * 180/M_PI;
-        ypr[1] = ypr[1] * 180/M_PI;
-        ypr[2] = ypr[2] * 180/M_PI;
+        ypr[0] = util::rad2Deg(ypr[0]);
+        ypr[1] = util::rad2Deg(ypr[1]);
+        ypr[2] = util::rad2Deg(ypr[2]);
 
-        /* ----------- Linear Accel (body frame) ----------- */
         dmpGetAccel(&aa, fifoBuffer);
         dmpGetLinearAccel(&aaReal, &aa, &gravity);
 
-        /* ----------- Linear Accel (world frame) ----------- */
         dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
 
         return {};
@@ -218,3 +224,4 @@ public:
             static_cast<double>(aaReal.z)}));
     }
 };
+
