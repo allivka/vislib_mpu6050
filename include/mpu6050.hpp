@@ -1,8 +1,8 @@
 #pragma once
 
-#include <vislib_arduino.hpp>
 #include <I2Cdev.h>
 #include <MPU6050_6Axis_MotionApps612.h>
+#include <vislib_arduino.hpp>
 
 namespace vislib::binds::mpu6050 {
 
@@ -120,7 +120,7 @@ protected:
 
     volatile bool dmpReady = false;
 
-    inline static volatile arduino::CallbackTable table;
+    inline static arduino::InterruptTable table;
 
     static void interruptRouter() noexcept {
         if (!table.isInitialized()) return;
@@ -135,16 +135,13 @@ protected:
 
     Quaternion q;
     VectorFloat gravity;
-    float ypr[3];
+    float ypr[3] = {0, 0, 0};
 
 public:
 
     static util::Error initInterruptTable(const util::Array<arduino::port_t>& ports) noexcept {
 
-        return table.InitCallbackTable(ports,
-            arduino::InterruptPortInitializer,
-            [](arduino::port_t) -> util::Error {return {};},
-            arduino::InterruptPortChecker);
+        return table.InitCallbackTable(ports, arduino::interruptPortInitializer);
     }
 
     virtual util::Error initDMP(arduino::port_t interruptPin) noexcept {
@@ -162,7 +159,12 @@ public:
         calibrate();
         setDMPEnabled(true);
 
-        auto e = table.setCallback(interruptPin, [this]() -> void {this->dmpReady = true;});
+        auto e = table.setCallback(CallbackSingle<arduino::port_t>(
+            CallbackBase<arduino::port_t>{.functor = [this]() -> void { this->dmpReady = true; }, .port = interruptPin},
+            arduino::interruptInitializer,
+            [](const CallbackBase<arduino::port_t>&) -> util::Error { return {}; },
+            arduino::interruptChecker
+        ));
 
         if (e) return e;
 
