@@ -163,7 +163,8 @@ public:
             CallbackBase<arduino::port_t>{.functor = [this]() -> void { this->dmpReady = true; }, .port = interruptPin},
             arduino::interruptInitializer,
             [](const CallbackBase<arduino::port_t>&) -> util::Error { return {}; },
-            arduino::interruptChecker
+            [](const CallbackBase<arduino::port_t>&) -> bool {return true; }
+            // arduino::interruptChecker
         ));
         
         if (e.isError()) return e;
@@ -180,6 +181,8 @@ public:
         table.manualProcess();
         
         if (!dmpReady) return {};
+        
+        dmpReady = false;
 
         if (!dmpGetCurrentFIFOPacket(fifoBuffer)) {
             resetFIFO();
