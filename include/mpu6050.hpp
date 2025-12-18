@@ -155,19 +155,19 @@ public:
             "DMP initialization failed, status code = " + util::to_string(static_cast<size_t>(status))
         };
 
-        pinMode(interruptPin, INPUT);
         calibrate();
-        setDMPEnabled(true);
-
-        auto e = table.setCallback(CallbackSingle<arduino::port_t>(
+        
+        static_cast<MPU6050*>(this)->setDMPEnabled(true);
+        
+        util::Error e = table.setCallback(CallbackSingle<arduino::port_t>(
             CallbackBase<arduino::port_t>{.functor = [this]() -> void { this->dmpReady = true; }, .port = interruptPin},
             arduino::interruptInitializer,
             [](const CallbackBase<arduino::port_t>&) -> util::Error { return {}; },
             arduino::interruptChecker
         ));
-
-        if (e) return e;
-
+        
+        if (e.isError()) return e;
+        
         attachInterrupt(digitalPinToInterrupt(interruptPin), interruptRouter, RISING);
         dmpGetFIFOPacketSize();
         dmpReady = true;
@@ -177,6 +177,8 @@ public:
     }
 
     util::Error update(nullptr_t) override {
+        table.manualProcess();
+        
         if (!dmpReady) return {};
 
         if (!dmpGetCurrentFIFOPacket(fifoBuffer)) {
