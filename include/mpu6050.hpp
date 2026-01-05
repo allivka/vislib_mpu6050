@@ -6,17 +6,13 @@
 
 namespace vislib::binds::mpu6050 {
 
-class GyroscopeBase;
-class GyroscopeDMP;
-class GyroscopeCalculator;
-
 constexpr size_t DMPFIFOBufferSize = 64;
 constexpr double defaultGyroDivider = 131.0;
 constexpr double defaultAccelerationDivider = 16384.0;
 
-};
 
-class vislib::binds::mpu6050::GyroscopeBase : public gyro::UltimateGyroGetter<double, size_t, double, nullptr_t>, public MPU6050 {
+
+class GyroscopeBase : public gyro::UltimateGyroGetter<double, size_t, double, nullptr_t>, public MPU6050 {
 protected:
     double gyroDivider = defaultGyroDivider;
     double accelerationDivider = defaultAccelerationDivider;
@@ -24,16 +20,16 @@ public:
 
     virtual ~GyroscopeBase() = default;
 
-    virtual util::Error init() noexcept {
+    virtual core::Error init() noexcept {
         initialize();
-        if (!testConnection()) return {util::ErrorCode::initFailed, "Failed mpu6050 connection test"};
+        if (!testConnection()) return {core::ErrorCode::initFailed, "Failed mpu6050 connection test"};
         auto e = calibrate();
         if (e) return e;
 
         return {};
     }
 
-    util::Error calibrate() noexcept override {
+    core::Error calibrate() noexcept override {
 
         this->setXGyroOffset(0);
         this->setYGyroOffset(0);
@@ -49,8 +45,8 @@ public:
         return {};
     }
 
-    util::Result<util::Vector<double>> getAcceleration() const noexcept override {
-        util::Vector<double> acceleration(vislib::util::Array<double>({double(), double(), double()}));
+    core::Result<core::Vector<double>> getAcceleration() const noexcept override {
+        core::Vector<double> acceleration(vislib::core::Array<double>({double(), double(), double()}));
 
         int16_t ax, ay, az;
 
@@ -64,8 +60,8 @@ public:
 
     }
 
-    util::Result<util::Vector<double>> getAngularSpeed() const noexcept override {
-        util::Vector<double> speed(vislib::util::Array<double>({double(), double(), double()}));
+    core::Result<core::Vector<double>> getAngularSpeed() const noexcept override {
+        core::Vector<double> speed(vislib::core::Array<double>({double(), double(), double()}));
 
         int16_t gx, gy, gz;
 
@@ -79,23 +75,23 @@ public:
 
     }
 
-    virtual util::Error setGyroDivider(double divider) noexcept {
-        if (divider == 0) return {util::ErrorCode::invalidArgument, "Cannot set gyro divider to zero"};
+    virtual core::Error setGyroDivider(double divider) noexcept {
+        if (divider == 0) return {core::ErrorCode::invalidArgument, "Cannot set gyro divider to zero"};
         gyroDivider = divider;
         return {};
     }
 
-    virtual util::Error setAccelerationDivider(double divider) noexcept {
-        if (divider == 0) return {util::ErrorCode::invalidArgument, "Cannot set acceleration divider to zero"};
+    virtual core::Error setAccelerationDivider(double divider) noexcept {
+        if (divider == 0) return {core::ErrorCode::invalidArgument, "Cannot set acceleration divider to zero"};
         accelerationDivider = divider;
         return {};
     }
 };
 
-class vislib::binds::mpu6050::GyroscopeCalculator : public GyroscopeBase, public gyro::UltimateGyroCalculator<double, size_t> {
+class GyroscopeCalculator : public GyroscopeBase, public gyro::UltimateGyroCalculator<double, size_t> {
 public:
 
-    util::Error calibrate() noexcept override {
+    core::Error calibrate() noexcept override {
 
         static_cast<GyroscopeBase*>(this)->calibrate();
 
@@ -111,21 +107,27 @@ public:
         return {};
     }
 
-    virtual ~GyroscopeCalculator() override = default;
+    ~GyroscopeCalculator() override = default;
 
 };
 
-class vislib::binds::mpu6050::GyroscopeDMP : public GyroscopeBase {
+template <int64_t ID> class DMPInterruptHandler {
+public:
+    static bool isReady;
+    static void handle() {
+        isReady = true;
+    }
+
+};
+
+template <int64_t ID> bool DMPInterruptHandler<ID>::isReady = false;
+
+class GyroscopeDMP : public GyroscopeBase {
 protected:
 
     volatile bool dmpReady = false;
 
     inline static arduino::InterruptTable table;
-
-    static void interruptRouter() noexcept {
-        if (!table.isInitialized()) return;
-        table.manualProcess();
-    }
 
     inline static uint8_t fifoBuffer[DMPFIFOBufferSize];
 
@@ -139,37 +141,37 @@ protected:
 
 public:
 
-    static util::Error initInterruptTable(const util::Array<arduino::port_t>& ports) noexcept {
+    static core::Error initInterruptTable(const core::Array<arduino::port_t>& ports) noexcept {
 
         return table.InitCallbackTable(ports, arduino::interruptPortInitializer);
     }
 
-    virtual util::Error initDMP(arduino::port_t interruptPin) noexcept {
+    template <int64_t GyroID> core::Error initDMP(arduino::port_t interruptPin) noexcept {
 
         if (!table.isInitialized())
-            return {util::ErrorCode::invalidConfiguration, "Interrupt table for gyroscope DMP driver wasn't initialized"};
+            return {core::ErrorCode::invalidConfiguration, "Interrupt table for gyroscope DMP driver wasn't initialized"};
 
         uint8_t status = dmpInitialize();
 
-        if (status != 0) return {util::ErrorCode::initFailed,
-            "DMP initialization failed, status code = " + util::to_string(static_cast<size_t>(status))
+        if (status != 0) return {core::ErrorCode::initFailed,
+            "DMP initialization failed, status code = " + core::to_string(static_cast<size_t>(status))
         };
 
         calibrate();
-        
+
         static_cast<MPU6050*>(this)->setDMPEnabled(true);
-        
-        util::Error e = table.setCallback(CallbackSingle<arduino::port_t>(
+
+        core::Error e = table.setCallback(CallbackSingle<arduino::port_t>(
             CallbackBase<arduino::port_t>{.functor = [this]() -> void { this->dmpReady = true; }, .port = interruptPin},
             arduino::interruptInitializer,
-            [](const CallbackBase<arduino::port_t>&) -> util::Error { return {}; },
-            [](const CallbackBase<arduino::port_t>&) -> bool {return true; }
-            // arduino::interruptChecker
+            [](const CallbackBase<arduino::port_t>&) -> core::Error { return {}; },
+            // [](const CallbackBase<arduino::port_t>&) -> bool {return true; }
+            arduino::interruptChecker
         ));
-        
+
         if (e.isError()) return e;
-        
-        attachInterrupt(digitalPinToInterrupt(interruptPin), interruptRouter, RISING);
+
+        attachInterrupt(digitalPinToInterrupt(interruptPin), DMPInterruptHandler<GyroID>::handle, RISING);
         dmpGetFIFOPacketSize();
         dmpReady = true;
 
@@ -177,11 +179,10 @@ public:
 
     }
 
-    util::Error update(nullptr_t) override {
-        table.manualProcess();
-        
+    core::Error update(nullptr_t) override {
+
         if (!dmpReady) return {};
-        
+
         dmpReady = false;
 
         if (!dmpGetCurrentFIFOPacket(fifoBuffer)) {
@@ -193,9 +194,9 @@ public:
         dmpGetGravity(&gravity, &q);
         dmpGetYawPitchRoll(ypr, &q, &gravity);
 
-        ypr[0] = util::rad2Deg(ypr[0]);
-        ypr[1] = util::rad2Deg(ypr[1]);
-        ypr[2] = util::rad2Deg(ypr[2]);
+        ypr[0] = core::rad2Deg(ypr[0]);
+        ypr[1] = core::rad2Deg(ypr[1]);
+        ypr[2] = core::rad2Deg(ypr[2]);
 
         dmpGetAccel(&aa, fifoBuffer);
         dmpGetLinearAccel(&aaReal, &aa, &gravity);
@@ -205,30 +206,32 @@ public:
         return {};
     }
 
-    util::Result<double> getYaw() const noexcept override {
+    core::Result<double> getYaw() const noexcept override {
         return ypr[0];
     }
 
-    util::Result<double> getPitch() const noexcept override {
+    core::Result<double> getPitch() const noexcept override {
         return ypr[1];
     }
 
-    util::Result<double> getRoll() const noexcept override {
+    core::Result<double> getRoll() const noexcept override {
         return ypr[2];
     }
 
-    util::Result<util::Vector<double>> getAcceleration() const noexcept override {
-        return util::Vector<double>(util::Array<double>({
+    core::Result<core::Vector<double>> getAcceleration() const noexcept override {
+        return core::Vector<double>(core::Array<double>({
             static_cast<double>(aaWorld.x),
             static_cast<double>(aaWorld.y),
             static_cast<double>(aaWorld.z)}));
     }
 
-    util::Result<util::Vector<double>> getRealAcceleration() const noexcept {
-        return util::Vector<double>(util::Array<double>({
+    core::Result<core::Vector<double>> getRealAcceleration() const noexcept {
+        return core::Vector<double>(core::Array<double>({
             static_cast<double>(aaReal.x),
             static_cast<double>(aaReal.y),
             static_cast<double>(aaReal.z)}));
     }
 };
 
+
+}
