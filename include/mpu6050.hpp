@@ -202,8 +202,6 @@ public:
 
         dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
         
-        Serial.println("Retrieved DMP data");
-        
         return {};
     }
 
