@@ -113,44 +113,37 @@ public:
 
 template <int64_t ID> class DMPInterruptHandler {
 public:
-    static bool isReady;
+    static volatile uint8_t queueLength;
     static void handle() {
-        isReady = true;
+        if(queueLength < 255) queueLength++;
+        
     }
 
 };
 
-template <int64_t ID> bool DMPInterruptHandler<ID>::isReady = false;
+template <int64_t ID> volatile uint8_t DMPInterruptHandler<ID>::queueLength = 0;
 
-class GyroscopeDMP : public GyroscopeBase {
+template <int64_t GyroID> class GyroscopeDMP : public GyroscopeBase {
 protected:
-
-    volatile bool dmpReady = false;
-
-    inline static arduino::InterruptTable table;
-
-    inline static uint8_t fifoBuffer[DMPFIFOBufferSize];
-
+    
+    arduino::port_t interruptPin{};
+    
+    uint16_t packetSize = 0;
+    
+    uint8_t fifoBuffer[DMPFIFOBufferSize];
+    
     VectorInt16 aa;
     VectorInt16 aaReal;
     VectorInt16 aaWorld;
-
+    
     Quaternion q;
     VectorFloat gravity;
     float ypr[3] = {0, 0, 0};
 
 public:
 
-    static core::Error initInterruptTable(const core::Array<arduino::port_t>& ports) noexcept {
-
-        return table.InitCallbackTable(ports, arduino::interruptPortInitializer);
-    }
-
-    template <int64_t GyroID> core::Error initDMP(arduino::port_t interruptPin) noexcept {
-
-        if (!table.isInitialized())
-            return {core::ErrorCode::invalidConfiguration, "Interrupt table for gyroscope DMP driver wasn't initialized"};
-
+    core::Error initDMP(arduino::port_t interruptPin) noexcept {
+        static_assert(GyroID >= 0, "GyroID must be unique and non-negative");
         uint8_t status = dmpInitialize();
 
         if (status != 0) return {core::ErrorCode::initFailed,
@@ -161,34 +154,40 @@ public:
 
         static_cast<MPU6050*>(this)->setDMPEnabled(true);
 
-        core::Error e = table.setCallback(CallbackSingle<arduino::port_t>(
-            CallbackBase<arduino::port_t>{.functor = [this]() -> void { this->dmpReady = true; }, .port = interruptPin},
-            arduino::interruptInitializer,
-            [](const CallbackBase<arduino::port_t>&) -> core::Error { return {}; },
-            // [](const CallbackBase<arduino::port_t>&) -> bool {return true; }
-            arduino::interruptChecker
-        ));
-
-        if (e.isError()) return e;
-
         attachInterrupt(digitalPinToInterrupt(interruptPin), DMPInterruptHandler<GyroID>::handle, RISING);
-        dmpGetFIFOPacketSize();
-        dmpReady = true;
+        packetSize = dmpGetFIFOPacketSize();
+        
+        this->interruptPin = interruptPin;
 
         return {};
 
     }
 
+    virtual ~GyroscopeDMP() {
+        detachInterrupt(digitalPinToInterrupt(interruptPin));
+        DMPInterruptHandler<GyroID>::queueLength = 0;
+    }
+
+
     core::Error update(nullptr_t) override {
+        static_assert(GyroID >= 0, "GyroID must be unique and non-negative");
+        uint8_t intStatus = getIntStatus();
 
-        if (!dmpReady) return {};
+        if (DMPInterruptHandler<GyroID>::queueLength == 0) return {};
+        
+        DMPInterruptHandler<GyroID>::queueLength--;
 
-        dmpReady = false;
+        uint16_t size = getFIFOCount();
 
-        if (!dmpGetCurrentFIFOPacket(fifoBuffer)) {
+        if (size < packetSize)
+            return {};
+
+        if (size >= 1024) {
             resetFIFO();
             return {};
         }
+        
+        getFIFOBytes(fifoBuffer, packetSize);
 
         dmpGetQuaternion(&q, fifoBuffer);
         dmpGetGravity(&gravity, &q);
@@ -202,7 +201,9 @@ public:
         dmpGetLinearAccel(&aaReal, &aa, &gravity);
 
         dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
-
+        
+        Serial.println("Retrieved DMP data");
+        
         return {};
     }
 
