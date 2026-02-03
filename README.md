@@ -2,7 +2,7 @@
 
 A simple implementation of vislib gyro interfaces for mpu6050 gyroscope sensor with electronic cats library under the hood
 
-## version: 0.0.2
+## version: 0.0.7
 
 ## installation
 
