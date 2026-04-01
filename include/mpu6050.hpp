@@ -153,6 +153,7 @@ public:
         calibrate();
 
         static_cast<MPU6050*>(this)->setDMPEnabled(true);
+        static_cast<MPU6050*>(this)->resetFIFO();
 
         attachInterrupt(digitalPinToInterrupt(interruptPin), DMPInterruptHandler<GyroID>::handle, RISING);
         packetSize = dmpGetFIFOPacketSize();
